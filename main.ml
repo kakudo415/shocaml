@@ -89,11 +89,13 @@ and mul'_parser lhs tokens =
 and elm_parser tokens =
   match tokens with
     | T_Integer num :: future -> (N_Integer num, future)
-    | T_LParen :: future ->
-      let root, future = add_parser future in
-      match future with
-        | T_RParen :: future -> (root, future)
-        | _ -> (N_Error, future)
+    | T_LParen :: future -> (
+        let root, future = add_parser future in
+        match future with
+          | T_RParen :: future -> (root, future)
+          | _ -> (N_Error, future)
+      )
+    | _ -> (N_Error, tokens)
 
 (* [token] -> node *)
 let rec parser tokens =
@@ -104,7 +106,42 @@ let rec parser tokens =
         | T_Integer _ | T_LParen ->
           let expr, future = add_parser tokens in
             expr
+        | _ -> N_Error
 
-let source_string = "(1 + 2 + 3 + 4) * 5 - 6 * 7"
+let rec emitter ast =
+  match ast with
+    | N_EOF -> ""
+    | N_Integer num ->
+      "  pushq $" ^ num ^ "\n"
+    | N_BinOp (op, lhs, rhs) -> (
+        match op with
+          | T_Add ->
+            let lasm = emitter lhs in
+            let rasm = emitter rhs in
+            lasm ^ rasm ^ "  popq %rdi\n  popq %rax\n  addq %rdi, %rax\n  pushq %rax\n"
+          | T_Sub ->
+            let lasm = emitter lhs in
+            let rasm = emitter rhs in
+            lasm ^ rasm ^ "  popq %rdi\n  popq %rax\n  subq %rdi, %rax\n  pushq %rax\n"
+          | T_Mul ->
+            let lasm = emitter lhs in
+            let rasm = emitter rhs in
+            lasm ^ rasm ^ "  popq %rdi\n  popq %rax\n  imulq %rdi, %rax\n  pushq %rax\n"
+          | T_Quo ->
+            let lasm = emitter lhs in
+            let rasm = emitter rhs in
+            lasm ^ rasm ^ "  popq %rdi\n  popq %rax\n  cqto\n  idivq %rdi\n  pushq %rax\n"
+          | T_Rem ->
+            let lasm = emitter lhs in
+            let rasm = emitter rhs in
+            lasm ^ rasm ^ "  popq %rdi\n  popq %rax\n  cqto\n  idivq %rdi\n  pushq %rdx\n"
+          | _ -> "  ERROR\n"
+      )
+    | _ -> "  ERROR\n"
+
+let source_string = "1 + (2 + 3) + 4 + 5 * 6 / 7 - 8 * 9 % 10"
 let source_chars = List.init (String.length source_string) (String.get source_string)
-let _ = parser (lexer source_chars)
+let tokens = lexer source_chars
+let ast = parser tokens
+let code = emitter ast
+let _ = print_string (".text\n.globl main\nmain:\n" ^ code ^ "  pop %rax\n  ret\n")
