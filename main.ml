@@ -1,4 +1,6 @@
+(* T Y P E S *)
 (* ハンガリアン記法なのは、モジュール分けせずに作成するため。苦肉の策。 *)
+
 type token =
   | T_Integer of string
   | T_Add
@@ -17,7 +19,6 @@ type node =
 
 
 (* L E X E R *)
-
 
 let rec int_lexer source =
   match source with
@@ -49,7 +50,6 @@ let rec lexer source =
 
 
 (* P A R S E R *)
-
 
 (* <add> ::= <mul> <add'> *)
 let rec add_parser tokens =
@@ -117,7 +117,6 @@ let rec parser tokens =
 
 (* E M I T T E R *)
 
-
 let rec emitter ast =
   match ast with
     | N_EOF -> ""
@@ -140,7 +139,6 @@ let rec emitter ast =
 
 
 (* MAIN *)
-
 
 let source_string = "1 + (2 + 3) + 4 + 5 * 6 / 7 - 8 * 9 % 10"
 let source_chars = List.init (String.length source_string) (String.get source_string)
