@@ -15,7 +15,10 @@ type node =
   | N_Error
   | N_EOF
 
-(* [char] -> (string, [char]) *)
+
+(* L E X E R *)
+
+
 let rec int_lexer source =
   match source with
     | [] -> "", source
@@ -26,7 +29,6 @@ let rec int_lexer source =
           (String.make 1 head) ^ digits, future (* TODO: (String.make 1 head)をいい感じにする。できないかも？ *)
         | _ -> "", source
 
-(* [char] -> [token] *)
 let rec lexer source =
   match source with
     | [] -> []
@@ -44,6 +46,10 @@ let rec lexer source =
         | ')' -> T_RParen :: lexer future
         | ' ' | '\t' | '\n' -> lexer future
         | _ -> []
+
+
+(* P A R S E R *)
+
 
 (* <add> ::= <mul> <add'> *)
 let rec add_parser tokens =
@@ -90,11 +96,11 @@ and elm_parser tokens =
   match tokens with
     | T_Integer num :: future -> (N_Integer num, future)
     | T_LParen :: future -> (
-        let root, future = add_parser future in
-        match future with
-          | T_RParen :: future -> (root, future)
-          | _ -> (N_Error, future)
-      )
+      let root, future = add_parser future in
+      match future with
+        | T_RParen :: future -> (root, future)
+        | _ -> (N_Error, future)
+    )
     | _ -> (N_Error, tokens)
 
 (* [token] -> node *)
@@ -108,40 +114,44 @@ let rec parser tokens =
             expr
         | _ -> N_Error
 
+
+(* E M I T T E R *)
+
+
 let rec emitter ast =
   match ast with
     | N_EOF -> ""
     | N_Integer num ->
       "  pushq $" ^ num ^ "\n"
     | N_BinOp (op, lhs, rhs) -> (
-        match op with
-          | T_Add ->
-            let lasm = emitter lhs in
-            let rasm = emitter rhs in
-            lasm ^ rasm ^ "  popq %rdi\n  popq %rax\n  addq %rdi, %rax\n  pushq %rax\n"
-          | T_Sub ->
-            let lasm = emitter lhs in
-            let rasm = emitter rhs in
-            lasm ^ rasm ^ "  popq %rdi\n  popq %rax\n  subq %rdi, %rax\n  pushq %rax\n"
-          | T_Mul ->
-            let lasm = emitter lhs in
-            let rasm = emitter rhs in
-            lasm ^ rasm ^ "  popq %rdi\n  popq %rax\n  imulq %rdi, %rax\n  pushq %rax\n"
-          | T_Quo ->
-            let lasm = emitter lhs in
-            let rasm = emitter rhs in
-            lasm ^ rasm ^ "  popq %rdi\n  popq %rax\n  cqto\n  idivq %rdi\n  pushq %rax\n"
-          | T_Rem ->
-            let lasm = emitter lhs in
-            let rasm = emitter rhs in
-            lasm ^ rasm ^ "  popq %rdi\n  popq %rax\n  cqto\n  idivq %rdi\n  pushq %rdx\n"
-          | _ -> "  ERROR\n"
-      )
+      (emitter lhs) ^
+      (emitter rhs) ^
+      "  popq %rdi\n" ^
+      "  popq %rax\n" ^
+      match op with
+        | T_Add -> "addq %rdi, %rax\n  pushq %rax\n"
+        | T_Sub -> "subq %rdi, %rax\n  pushq %rax\n"
+        | T_Mul -> "imulq %rdi, %rax\n  pushq %rax\n"
+        | T_Quo -> "cqto\n  idivq %rdi\n  pushq %rax\n"
+        | T_Rem -> "cqto\n  idivq %rdi\n  pushq %rdx\n"
+        | _ -> "  ERROR\n"
+    )
     | _ -> "  ERROR\n"
+
+
+(* MAIN *)
+
 
 let source_string = "1 + (2 + 3) + 4 + 5 * 6 / 7 - 8 * 9 % 10"
 let source_chars = List.init (String.length source_string) (String.get source_string)
 let tokens = lexer source_chars
 let ast = parser tokens
 let code = emitter ast
-let _ = print_string (".text\n.globl main\nmain:\n" ^ code ^ "  pop %rax\n  ret\n")
+let _ = print_string (
+  ".text\n" ^
+  ".globl main\n" ^
+  "main:\n" ^
+  code ^
+  "  pop %rax\n" ^
+  "  ret\n"
+)
