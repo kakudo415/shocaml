@@ -12,9 +12,10 @@ type token =
 type node =
   | N_Integer of string
   | N_BinOp of token * node * node (* TODO: 演算子が取りうる子要素に定義を絞る *)
+  | N_Error
   | N_EOF
 
-(* [char] -> string, [char] *)
+(* [char] -> (string, [char]) *)
 let rec int_lexer source =
   match source with
     | [] -> "", source
@@ -44,43 +45,55 @@ let rec lexer source =
         | ' ' | '\t' | '\n' -> lexer future
         | _ -> []
 
-(* FIXME: 左結合にしなくちゃ！！！！ *)
-(* [tokens] -> node *)
-let rec addsub_parser tokens =
-  let lhs, future = mulquorem_parser tokens in
-  match future with
+(* <add> ::= <mul> <add'> *)
+let rec add_parser tokens =
+  let lhs, future = mul_parser tokens in
+  add'_parser lhs future
+
+(* <add'> ::= "+" <mul> <add'> | "" *)
+and add'_parser lhs tokens =
+  match tokens with
     | T_Add :: future ->
-      let rhs, future = addsub_parser future in
-      N_BinOp (T_Add, lhs, rhs), future
+      let rhs, future = mul_parser future in
+      let root = N_BinOp (T_Add, lhs, rhs) in
+      add'_parser root future
     | T_Sub :: future ->
-      let rhs, future = addsub_parser future in
-      N_BinOp (T_Sub, lhs, rhs), future
-    | _ -> lhs, future
+      let rhs, future = mul_parser future in
+      let root = N_BinOp (T_Sub, lhs, rhs) in
+      add'_parser root future
+    | _ -> (lhs, tokens)
 
-(* [tokens] -> node *)
-and mulquorem_parser tokens =
+(* <mul> ::= <elm> <mul'> *)
+and mul_parser tokens =
   let lhs, future = elm_parser tokens in
-  match future with
-    | T_Mul :: future ->
-      let rhs, future = mulquorem_parser future in
-      N_BinOp (T_Mul, lhs, rhs), future
-    | T_Quo :: future ->
-      let rhs, future = mulquorem_parser future in
-      N_BinOp (T_Quo, lhs, rhs), future
-    | T_Rem :: future ->
-      let rhs, future = mulquorem_parser future in
-      N_BinOp (T_Rem, lhs, rhs), future
-    | _ -> lhs, future
+  mul'_parser lhs future
 
-(* [tokens] -> node *)
+(* <mul'> ::= "*" <elm> <mul'> | "" *)
+and mul'_parser lhs tokens =
+  match tokens with
+    | T_Mul :: future ->
+      let rhs, future = elm_parser future in
+      let root = N_BinOp (T_Mul, lhs, rhs) in
+      mul'_parser root future
+    | T_Quo :: future ->
+      let rhs, future = elm_parser future in
+      let root = N_BinOp (T_Quo, lhs, rhs) in
+      mul'_parser root future
+    | T_Rem :: future ->
+      let rhs, future = elm_parser future in
+      let root = N_BinOp (T_Rem, lhs, rhs) in
+      mul'_parser root future
+    | _ -> (lhs, tokens)
+
+(* <elm> ::= "(" <add> ")" | <int> *)
 and elm_parser tokens =
   match tokens with
-    | T_Integer num :: future -> N_Integer num, future
+    | T_Integer num :: future -> (N_Integer num, future)
     | T_LParen :: future ->
-      let expr, future = addsub_parser future in
+      let root, future = add_parser future in
       match future with
-        | T_RParen :: _ -> expr, future
-        | _ -> (* ERROR *) (N_EOF, future)
+        | T_RParen :: future -> (root, future)
+        | _ -> (N_Error, future)
 
 (* [token] -> node *)
 let rec parser tokens =
@@ -89,9 +102,9 @@ let rec parser tokens =
     | head :: future ->
       match head with
         | T_Integer _ | T_LParen ->
-          let expr, future = addsub_parser tokens in
+          let expr, future = add_parser tokens in
             expr
 
-let source_string = "(1 + 2 - 3) / 4 + 5 * 6"
+let source_string = "(1 + 2 + 3 + 4) * 5 - 6 * 7"
 let source_chars = List.init (String.length source_string) (String.get source_string)
 let _ = parser (lexer source_chars)
