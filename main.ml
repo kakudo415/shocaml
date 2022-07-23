@@ -2,7 +2,9 @@
 (* ハンガリアン記法なのは、モジュール分けせずに作成するため。苦肉の策。 *)
 
 type token =
+  | T_Identifier of string
   | T_Integer of string
+  | T_Eq
   | T_Add
   | T_Sub
   | T_Mul
@@ -10,10 +12,16 @@ type token =
   | T_Rem
   | T_LParen
   | T_RParen
+  | T_Let
+  | T_And
+  | T_In
 
+(* TODO: 各ノードが取りうる型のみ子要素になるように定義を絞る *)
 type node =
   | N_Integer of string
-  | N_BinOp of token * node * node (* TODO: 演算子が取りうる子要素に定義を絞る *)
+  | N_LetIn of node * node
+  | N_Bindings of (string * node) list
+  | N_BinOp of token * node * node
   | N_Error
   | N_EOF
 
@@ -22,22 +30,41 @@ type node =
 
 let rec int_lexer source =
   match source with
-    | [] -> "", source
+    | [] -> ("", source)
     | head :: future ->
       match head with
         | '0' .. '9' ->
           let digits, future = int_lexer future in
-          (String.make 1 head) ^ digits, future (* TODO: (String.make 1 head)をいい感じにする。できないかも？ *)
-        | _ -> "", source
+          ((String.make 1 head) ^ digits, future) (* TODO: (String.make 1 head)をいい感じにする。できないかも？ | '0' -> "0" ^ digits にすればできるが･･･ *)
+        | _ -> ("", source)
+
+and ident_lexer source =
+  match source with
+    | [] -> ("", source)
+    | head :: future ->
+      match head with
+        | 'a' .. 'z' | 'A' .. 'Z' | '_' | '0' .. '9' | '\'' ->
+          let ident, future = ident_lexer future in
+          ((String.make 1 head) ^ ident, future) (* TODO: (String.make 1 head)をいい感じにする。できないかも？ *)
+        | _ -> ("", source)
 
 let rec lexer source =
   match source with
     | [] -> []
     | head :: future ->
       match head with
+        | 'a' .. 'z' | 'A' .. 'Z' | '_' -> (
+          let ident, future = ident_lexer source in
+          match ident with
+            | "let" -> T_Let :: lexer future
+            | "and" -> T_And :: lexer future
+            | "in" -> T_In :: lexer future
+            | _ -> T_Identifier ident :: lexer future
+        )
         | '0' .. '9' ->
           let num, future = int_lexer source in
           T_Integer num :: lexer future
+        | '=' -> T_Eq :: lexer future
         | '+' -> T_Add :: lexer future
         | '-' -> T_Sub :: lexer future
         | '*' -> T_Mul :: lexer future
@@ -51,8 +78,32 @@ let rec lexer source =
 
 (* P A R S E R *)
 
+let rec expr_parser tokens =
+  match tokens with
+    | T_Let :: future -> (
+      let bindings, future = binding_parser future in
+      match future with
+        | T_In :: future ->
+          let expr, future = expr_parser future in
+          (N_LetIn (N_Bindings bindings, expr), future)
+        | _ -> (N_Error, future)
+    )
+    | _ -> add_parser tokens
+
+and binding_parser tokens =
+  match tokens with
+    | T_Identifier name :: T_Eq :: future -> (
+      let expr, future = expr_parser future in
+      match future with
+        | T_And :: future ->
+          let bindings, future = binding_parser future in
+          ((name, expr) :: bindings, future)
+        | _ -> ([(name, expr)], future)
+    )
+    | _ -> ([], tokens)
+
 (* <add> ::= <mul> <add'> *)
-let rec add_parser tokens =
+and add_parser tokens =
   let lhs, future = mul_parser tokens in
   add'_parser lhs future
 
@@ -103,16 +154,15 @@ and elm_parser tokens =
     )
     | _ -> (N_Error, tokens)
 
-(* [token] -> node *)
 let rec parser tokens =
   match tokens with
     | [] -> N_EOF
     | head :: future ->
       match head with
-        | T_Integer _ | T_LParen ->
-          let expr, future = add_parser tokens in
-            expr
-        | _ -> N_Error
+        (* 現状、式以外の構文は無いです *)
+        | _ ->
+          let expr, future = expr_parser tokens in
+          expr
 
 
 (* E M I T T E R *)
@@ -140,11 +190,47 @@ let rec emitter ast =
 
 (* MAIN *)
 
-let source_string = "1 + (2 + 3) + 4 + 5 * 6 / 7 - 8 * 9 % 10"
+let rec string_of_ast level ast =
+  (indent_from_level level) ^ match ast with
+    | N_Integer num -> num ^ "\n"
+    | N_BinOp (op, lhs, rhs) -> (
+      (
+        match op with
+          | T_Add -> "Add\n"
+          | T_Sub -> "Sub\n"
+          | T_Mul -> "Mul\n"
+          | T_Quo -> "Quo\n"
+          | T_Rem -> "Rem\n"
+          | _ -> "ERROR\n"
+      )
+      ^ (string_of_ast (level + 1) lhs)
+      ^ (string_of_ast (level + 1) rhs)
+    )
+    | N_LetIn (bindings, expr) ->
+      (string_of_ast level bindings) ^
+      (indent_from_level level) ^ "In\n" ^
+      (string_of_ast (level + 1) expr)
+    | N_Bindings bindings -> (
+      match bindings with
+        | [] -> ""
+        | (name, expr) :: bindings ->
+          "Binding " ^ name ^ " = \n"
+          ^ (string_of_ast (level + 1) expr)
+          ^ (string_of_ast level (N_Bindings bindings))
+    )
+    | _ -> "ERROR\n"
+
+and indent_from_level level =
+  match level with
+    | 0 -> ""
+    | level -> "  " ^ indent_from_level (level - 1)
+
+let source_string = "let hoge = 12 + 34 and fuga = 56 * 78 / 9 in 234 + 456"
 let source_chars = List.init (String.length source_string) (String.get source_string)
 let tokens = lexer source_chars
 let ast = parser tokens
-let code = emitter ast
+let _ = prerr_string (string_of_ast 0 ast)
+(* let code = emitter ast
 let _ = print_string (
   ".text\n" ^
   ".globl main\n" ^
@@ -152,4 +238,4 @@ let _ = print_string (
   code ^
   "  pop %rax\n" ^
   "  ret\n"
-)
+) *)
