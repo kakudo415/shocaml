@@ -19,6 +19,7 @@ type token =
 (* TODO: 各ノードが取りうる型のみ子要素になるように定義を絞る *)
 type node =
   | N_Integer of string
+  | N_Identifier of string
   | N_LetIn of node * node
   | N_Bindings of (string * node) list
   | N_BinOp of token * node * node
@@ -146,6 +147,7 @@ and mul'_parser lhs tokens =
 and elm_parser tokens =
   match tokens with
     | T_Integer num :: future -> (N_Integer num, future)
+    | T_Identifier name :: future -> (N_Identifier name, future)
     | T_LParen :: future -> (
       let root, future = add_parser future in
       match future with
@@ -165,6 +167,21 @@ let rec parser tokens =
           expr
 
 
+(* A N A L Y Z E R *)
+
+let rec analyzer ast =
+  match ast with
+    | N_LetIn (bindings, _) ->
+      bindings_analyzer bindings
+    | _ -> []
+
+and bindings_analyzer bindings =
+  match bindings with
+    | [] -> []
+    | (name, expr) :: bindings ->
+      name :: bindings_analyzer bindings
+
+
 (* E M I T T E R *)
 
 let rec emitter ast =
@@ -172,17 +189,19 @@ let rec emitter ast =
     | N_EOF -> ""
     | N_Integer num ->
       "  pushq $" ^ num ^ "\n"
+    | N_Identifier name ->
+      
     | N_BinOp (op, lhs, rhs) -> (
       (emitter lhs) ^
       (emitter rhs) ^
       "  popq %rdi\n" ^
       "  popq %rax\n" ^
       match op with
-        | T_Add -> "addq %rdi, %rax\n  pushq %rax\n"
-        | T_Sub -> "subq %rdi, %rax\n  pushq %rax\n"
-        | T_Mul -> "imulq %rdi, %rax\n  pushq %rax\n"
-        | T_Quo -> "cqto\n  idivq %rdi\n  pushq %rax\n"
-        | T_Rem -> "cqto\n  idivq %rdi\n  pushq %rdx\n"
+        | T_Add -> "  addq %rdi, %rax\n  pushq %rax\n"
+        | T_Sub -> "  subq %rdi, %rax\n  pushq %rax\n"
+        | T_Mul -> "  imulq %rdi, %rax\n  pushq %rax\n"
+        | T_Quo -> "  cqto\n  idivq %rdi\n  pushq %rax\n"
+        | T_Rem -> "  cqto\n  idivq %rdi\n  pushq %rdx\n"
         | _ -> "  ERROR\n"
     )
     | _ -> "  ERROR\n"
@@ -193,6 +212,7 @@ let rec emitter ast =
 let rec string_of_ast level ast =
   (indent_from_level level) ^ match ast with
     | N_Integer num -> num ^ "\n"
+    | N_Identifier name -> name ^ "\n"
     | N_BinOp (op, lhs, rhs) -> (
       (
         match op with
@@ -225,12 +245,13 @@ and indent_from_level level =
     | 0 -> ""
     | level -> "  " ^ indent_from_level (level - 1)
 
-let source_string = "let hoge = 12 + 34 and fuga = 56 * 78 / 9 in 234 + 456"
+let source_string = "let hoge = 123 in hoge"
 let source_chars = List.init (String.length source_string) (String.get source_string)
 let tokens = lexer source_chars
 let ast = parser tokens
 let _ = prerr_string (string_of_ast 0 ast)
-(* let code = emitter ast
+let symbols = analyzer ast
+let code = emitter ast symbols
 let _ = print_string (
   ".text\n" ^
   ".globl main\n" ^
@@ -238,4 +259,4 @@ let _ = print_string (
   code ^
   "  pop %rax\n" ^
   "  ret\n"
-) *)
+)
